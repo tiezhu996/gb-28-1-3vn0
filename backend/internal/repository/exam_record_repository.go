@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -17,6 +18,9 @@ import (
 type ExamRecordRepository interface {
 	Create(ctx context.Context, r *model.ExamRecord) error
 	Update(ctx context.Context, r *model.ExamRecord) error
+	// SaveDraft 自动保存草稿：仅当记录仍为 in_progress 且请求版本号新于已存版本号时才写入（原子条件更新）。
+	// 返回 ErrNotFound 表示记录不存在；ErrConflict 表示状态已变（已交卷等）或版本号过旧（乱序旧请求）。
+	SaveDraft(ctx context.Context, id, studentID primitive.ObjectID, questions []model.AttemptQuestion, currentIndex int, version int64, savedAt time.Time) error
 	FindByID(ctx context.Context, id primitive.ObjectID) (*model.ExamRecord, error)
 	FindActiveByExamAndStudent(ctx context.Context, examID, studentID primitive.ObjectID) (*model.ExamRecord, error)
 	List(ctx context.Context, filter bson.M, page, pageSize int64) ([]*model.ExamRecord, int64, error)
@@ -49,6 +53,35 @@ func (r *MongoExamRecordRepository) Update(ctx context.Context, rec *model.ExamR
 	}
 	if res.MatchedCount == 0 {
 		return fmt.Errorf("update exam record: %w", ErrNotFound)
+	}
+	return nil
+}
+
+// SaveDraft 条件更新草稿：本人 + in_progress + 更新的版本号三者同时满足才写入，
+// 杜绝乱序保存覆盖新答案，也不会写花已交卷的答卷。
+func (r *MongoExamRecordRepository) SaveDraft(ctx context.Context, id, studentID primitive.ObjectID, questions []model.AttemptQuestion, currentIndex int, version int64, savedAt time.Time) error {
+	filter := bson.M{
+		"_id":          id,
+		"student_id":   studentID,
+		"status":       modelStatusInProgress(),
+		"save_version": bson.M{"$lt": version},
+	}
+	update := bson.M{
+		"$set": bson.M{
+			"questions":     questions,
+			"current_index": currentIndex,
+			"save_version":  version,
+			"last_saved_at": savedAt,
+			"updated_at":    savedAt,
+		},
+	}
+	res, err := r.coll.UpdateOne(ctx, filter, update)
+	if err != nil {
+		return fmt.Errorf("save draft exam record: %w", err)
+	}
+	if res.MatchedCount == 0 {
+		// 区分“记录不存在/非本人/已交卷”与“版本号过旧”，统一由 service 再查一次判定，这里先返回冲突。
+		return ErrConflict
 	}
 	return nil
 }

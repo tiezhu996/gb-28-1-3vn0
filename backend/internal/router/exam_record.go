@@ -15,6 +15,7 @@ func RegisterExamRecordRoutes(g *gin.RouterGroup, h *handler.ExamRecordHandler) 
 	{
 		student.POST("/:id/start", h.Start)
 		student.GET("/mine", h.ListMine)
+		student.PUT("/:id/autosave", h.AutoSave)
 		student.POST("/:id/submit", h.Submit)
 	}
 

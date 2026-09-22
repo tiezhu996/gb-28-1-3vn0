@@ -101,6 +101,9 @@ export interface ExamRecord {
   pass_score: number;
   cheat_count: number;
   auto_submitted: boolean;
+  save_version: number;
+  current_index: number;
+  last_saved_at?: string | null;
   questions: AttemptQuestion[];
   created_at: string;
 }

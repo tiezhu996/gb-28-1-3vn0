@@ -6,12 +6,24 @@ export interface AnswerInput {
   answer: string;
 }
 
+export interface AutoSaveInput {
+  answers: AnswerInput[];
+  current_index: number;
+  save_version: number;
+}
+
 export const recordApi = {
   start(examId: string) {
     return request<ExamRecord>(`/exam-records/${examId}/start`, { method: 'POST' });
   },
   mine(query: { status?: string; page?: number; page_size?: number }) {
     return request<PageResult<ExamRecord>>(`/exam-records/mine${buildQuery({ ...query })}`);
+  },
+  autoSave(id: string, payload: AutoSaveInput) {
+    return request<ExamRecord>(`/exam-records/${id}/autosave`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
   },
   submit(id: string, answers: AnswerInput[], cheatCount: number, cheatEvents: { type: string; detail: string }[]) {
     return request<ExamRecord>(`/exam-records/${id}/submit`, {

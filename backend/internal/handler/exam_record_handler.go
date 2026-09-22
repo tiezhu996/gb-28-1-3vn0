@@ -47,6 +47,26 @@ func (h *ExamRecordHandler) Start(c *gin.Context) {
 	Success(c, dto.ToRecordResponse(rec))
 }
 
+// AutoSave 学生自动保存答卷草稿（断点续答）。
+func (h *ExamRecordHandler) AutoSave(c *gin.Context) {
+	id, err := primitive.ObjectIDFromHex(c.Param("id"))
+	if err != nil {
+		Error(c, util.NewAppError(constants.CodeBadRequest, "考试记录模块：id 参数非法"))
+		return
+	}
+	var req dto.AutoSaveRecordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Error(c, util.WrapAppError(constants.CodeValidationFailed, fmt.Sprintf("考试记录模块：自动保存参数校验失败（字段 save_version）（%s）", err.Error()), err))
+		return
+	}
+	rec, err := h.svc.SaveDraft(c.Request.Context(), id, middleware.GetUserID(c), req.Answers, req.CurrentIndex, req.SaveVersion)
+	if err != nil {
+		Error(c, err)
+		return
+	}
+	SuccessMessage(c, constants.MsgRecordAutoSaveSuccess, dto.ToRecordResponse(rec))
+}
+
 // Submit 学生提交答卷。
 func (h *ExamRecordHandler) Submit(c *gin.Context) {
 	id, err := primitive.ObjectIDFromHex(c.Param("id"))
@@ -59,7 +79,7 @@ func (h *ExamRecordHandler) Submit(c *gin.Context) {
 		Error(c, util.WrapAppError(constants.CodeValidationFailed, fmt.Sprintf("考试记录模块：提交答卷参数校验失败（字段 answers）（%s）", err.Error()), err))
 		return
 	}
-	rec, err := h.svc.Submit(c.Request.Context(), id, req.Answers, req.CheatCount, req.CheatEvents, false)
+	rec, err := h.svc.Submit(c.Request.Context(), id, middleware.GetUserID(c), req.Answers, req.CheatCount, req.CheatEvents, false)
 	if err != nil {
 		Error(c, err)
 		return
@@ -74,7 +94,7 @@ func (h *ExamRecordHandler) AutoSubmit(c *gin.Context) {
 		Error(c, util.NewAppError(constants.CodeBadRequest, "考试记录模块：id 参数非法"))
 		return
 	}
-	rec, err := h.svc.Submit(c.Request.Context(), id, nil, 0, nil, true)
+	rec, err := h.svc.Submit(c.Request.Context(), id, primitive.NilObjectID, nil, 0, nil, true)
 	if err != nil {
 		Error(c, err)
 		return

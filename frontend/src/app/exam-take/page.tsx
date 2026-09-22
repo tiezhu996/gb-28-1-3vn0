@@ -2,11 +2,32 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCountdown } from '@/hooks/useCountdown';
+import { useAutoSave, type SaveStatus } from '@/hooks/useAutoSave';
 import { recordApi, type AnswerInput } from '@/api/record';
 import { examApi } from '@/api/exam';
 import { QuestionTypeBadge } from '@/components/StatusBadge';
 import { questionTypeText } from '@/utils/format';
 import type { Exam, ExamRecord } from '@/types';
+
+function SaveIndicator({ status, onRetry }: { status: SaveStatus; onRetry: () => void }) {
+  if (status === 'saving') {
+    return <span className="text-xs text-gray-400">⏳ 自动保存中…</span>;
+  }
+  if (status === 'saved') {
+    return <span className="text-xs text-green-600">✓ 已自动保存</span>;
+  }
+  if (status === 'error') {
+    return (
+      <button onClick={onRetry} className="text-xs text-red-600 hover:underline">
+        ⚠ 自动保存失败，点击重试（页面答案未改动）
+      </button>
+    );
+  }
+  if (status === 'conflict') {
+    return <span className="text-xs text-red-600">⚠ 检测到其他设备有更新的作答，请刷新页面后继续</span>;
+  }
+  return null;
+}
 
 function ExamTake() {
   const router = useRouter();
@@ -26,6 +47,19 @@ function ExamTake() {
   const cheatRef = useRef(0);
   const eventsRef = useRef<{ type: string; detail: string }[]>([]);
 
+  const { status: saveStatus, scheduleSave, flush, retry } = useAutoSave(record);
+
+  // 始终保存最新作答/题号的引用，供自动保存、交卷、倒计时回调读取
+  const answersRef = useRef<Record<string, string>>({});
+  const currentRef = useRef(0);
+  const recordRef = useRef<ExamRecord | null>(null);
+  const readyRef = useRef(false);
+  // 恢复后的初始签名：与基线一致时不触发自动保存（只有真实作答/切题变化才保存）
+  const baselineSigRef = useRef('');
+  answersRef.current = answers;
+  currentRef.current = current;
+  recordRef.current = record;
+
   const load = useCallback(async () => {
     if (!recordId && !examId) return;
     let rec: ExamRecord;
@@ -43,11 +77,18 @@ function ExamTake() {
     } catch {
       setExam(null);
     }
+    // 断点续答：恢复最后已保存的答案与当前题号（剩余时间由 started_at + 时长决定，倒计时自然恢复）
     const ans: Record<string, string> = {};
     rec.questions.forEach((q) => {
       if (q.user_answer) ans[q.question_id] = q.user_answer;
     });
     setAnswers(ans);
+    answersRef.current = ans;
+    const restoredIndex = Math.min(Math.max(rec.current_index ?? 0, 0), Math.max(rec.questions.length - 1, 0));
+    setCurrent(restoredIndex);
+    currentRef.current = restoredIndex;
+    baselineSigRef.current = `${JSON.stringify(Object.entries(ans).sort())}:${restoredIndex}`;
+    readyRef.current = true;
   }, [recordId, examId]);
 
   useEffect(() => {
@@ -102,13 +143,28 @@ function ExamTake() {
     return new Date(record.started_at).getTime() + duration * 60 * 1000;
   }, [record, exam]);
 
+  // 作答或题号变化后短暂停顿自动保存；与恢复时的基线签名相同则跳过（不产生无意义保存）
+  useEffect(() => {
+    if (!readyRef.current) return;
+    const sig = `${JSON.stringify(Object.entries(answers).sort())}:${current}`;
+    if (sig === baselineSigRef.current) return;
+    const rec = recordRef.current;
+    if (!rec || rec.status !== 'in_progress') return;
+    const ansList: AnswerInput[] = Object.entries(answers).map(([question_id, answer]) => ({ question_id, answer }));
+    scheduleSave(ansList, current);
+  }, [answers, current, scheduleSave]);
+
   const doSubmit = useCallback(
     async (auto = false) => {
-      if (!record) return;
+      const rec = recordRef.current;
+      if (!rec) return;
       setSubmitting(true);
       try {
-        const ansList: AnswerInput[] = Object.entries(answers).map(([question_id, answer]) => ({ question_id, answer }));
-        await recordApi.submit(record.id, ansList, cheatRef.current, eventsRef.current);
+        // 交卷前先把最后一次未落盘的草稿写上去（截止时用最后已保存答案交卷）；
+        // 即使保存失败（如刚好超时），也继续走原交卷/自动交卷流程，由服务端拒绝或定时任务兜底
+        await flush();
+        const ansList: AnswerInput[] = Object.entries(answersRef.current).map(([question_id, answer]) => ({ question_id, answer }));
+        await recordApi.submit(rec.id, ansList, cheatRef.current, eventsRef.current);
         alert(auto ? '考试时间到，答卷已自动提交' : '答卷提交成功，客观题已自动评分');
         router.push('/records');
       } catch (err) {
@@ -117,7 +173,7 @@ function ExamTake() {
         setSubmitting(false);
       }
     },
-    [record, answers, router],
+    [router, flush],
   );
 
   const { text, warn5 } = useCountdown(endAt, () => {
@@ -170,6 +226,7 @@ function ExamTake() {
             <p className="text-xs text-gray-400">共 {record.questions.length} 题 · 已答 {answeredCount} 题</p>
           </div>
           <div className="flex items-center gap-3">
+            <SaveIndicator status={saveStatus} onRetry={retry} />
             {warn5 && <span className="text-sm font-medium text-red-600">⚠️ 剩余不足 5 分钟</span>}
             <span className={`rounded-lg px-3 py-1 font-mono text-lg font-bold ${warn5 ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'}`}>
               {text}

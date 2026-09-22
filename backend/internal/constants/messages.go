@@ -13,6 +13,7 @@ const (
 	MsgExamAutoGenerate      = "自动组卷完成"
 	MsgExamPublishSuccess    = "试卷发布成功"
 	MsgRecordSubmitSuccess   = "答卷提交成功"
+	MsgRecordAutoSaveSuccess = "答卷自动保存成功"
 	MsgRecordGradedSuccess   = "主观题批改完成"
 	MsgWrongBookAdded        = "已加入错题本"
 	MsgWrongBookResolved     = "已标记为已掌握"
@@ -32,5 +33,7 @@ const (
 	MsgRecordNotFound      = "考试记录模块：id=%s 的记录不存在"
 	MsgRecordStatusInvalid = "考试记录模块：状态字段 %s 非法，无法执行该操作"
 	MsgRecordExpired       = "考试记录模块：考试时长已超时"
+	MsgRecordNotOwner      = "考试记录模块：id=%s 的答卷不属于当前学生，禁止操作"
+	MsgRecordStaleSave     = "考试记录模块：id=%s 的自动保存版本 %d 已过期（服务端版本 %d），忽略旧请求"
 	MsgWrongBookExists     = "错题本模块：question_id=%s 已在错题本中"
 )
