@@ -1,0 +1,17 @@
+# Go
+backend/server
+backend/bin/
+
+# Node / Next
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env.local
+frontend/npm-debug.log*
+
+# 环境文件（保留 .env.example，忽略 .env）
+.env
+
+# 系统
+.DS_Store
+*.log

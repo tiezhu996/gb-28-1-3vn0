@@ -1,0 +1,85 @@
+name: onlineexam
+
+services:
+  db:
+    image: mongo:7
+    container_name: ${COMPOSE_PROJECT_NAME:-onlineexam}-db
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-root_pwd}
+      MONGO_INITDB_DATABASE: ${DB_NAME:-onlineexam_db}
+    ports:
+      - "${DB_PORT:-44011}:27017"
+    volumes:
+      - mongo_data:/data/db
+      - ./database/init.js:/docker-entrypoint-initdb.d/init.js:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: ${COMPOSE_PROJECT_NAME:-onlineexam}-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-46311}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  backend:
+    build: ./backend
+    container_name: ${COMPOSE_PROJECT_NAME:-onlineexam}-backend
+    restart: unless-stopped
+    environment:
+      SERVER_PORT: "8080"
+      SERVER_HOST: "0.0.0.0"
+      GIN_MODE: release
+      LOG_LEVEL: info
+      MONGO_URI: mongodb://db:27017
+      DB_NAME: ${DB_NAME:-onlineexam_db}
+      DB_USER: ${DB_USER:-onlineexam_user}
+      DB_PASSWORD: ${DB_PASSWORD:-onlineexam_pwd}
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      JWT_SECRET: ${JWT_SECRET:-change_me_to_a_long_random_string}
+      JWT_EXPIRES_MINUTES: "720"
+      ALLOWED_ORIGINS: "*"
+      RATE_LIMIT_PER_MINUTE: "300"
+      SEED_ENABLED: "true"
+    ports:
+      - "${BACKEND_PORT:-3003}:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 15s
+
+  frontend:
+    build: ./frontend
+    container_name: ${COMPOSE_PROJECT_NAME:-onlineexam}-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-8003}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  mongo_data:
+  redis_data:
