@@ -67,6 +67,26 @@ func (h *ExamRecordHandler) Submit(c *gin.Context) {
 	SuccessMessage(c, constants.MsgRecordSubmitSuccess, dto.ToRecordResponse(rec))
 }
 
+// SaveDraft 学生自动保存作答草稿（断点续答）。
+func (h *ExamRecordHandler) SaveDraft(c *gin.Context) {
+	id, err := primitive.ObjectIDFromHex(c.Param("id"))
+	if err != nil {
+		Error(c, util.NewAppError(constants.CodeBadRequest, "考试记录模块：id 参数非法"))
+		return
+	}
+	var req dto.SaveDraftRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Error(c, util.WrapAppError(constants.CodeValidationFailed, fmt.Sprintf("考试记录模块：草稿保存参数校验失败（%s）", err.Error()), err))
+		return
+	}
+	res, err := h.svc.SaveDraft(c.Request.Context(), id, middleware.GetUserID(c), req.Answers, req.CurrentIndex, req.Version)
+	if err != nil {
+		Error(c, err)
+		return
+	}
+	Success(c, res)
+}
+
 // AutoSubmit 超时自动提交（教师/管理员触发或定时任务）。
 func (h *ExamRecordHandler) AutoSubmit(c *gin.Context) {
 	id, err := primitive.ObjectIDFromHex(c.Param("id"))

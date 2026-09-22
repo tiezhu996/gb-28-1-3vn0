@@ -53,7 +53,7 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
   if (authToken) {
     headers.Authorization = `Bearer ${authToken}`;
   }
-  const res = await fetch(`${BASE}${path}`, { ...options, headers });
+  const res = await fetch(`${BASE}${path}`, { ...options, headers, keepalive: options.keepalive });
   return handle<T>(res);
 }
 

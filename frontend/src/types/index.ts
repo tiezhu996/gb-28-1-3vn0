@@ -101,8 +101,17 @@ export interface ExamRecord {
   pass_score: number;
   cheat_count: number;
   auto_submitted: boolean;
+  answer_version: number;
+  current_index: number;
+  saved_at?: string | null;
   questions: AttemptQuestion[];
   created_at: string;
+}
+
+export interface SaveDraftResult {
+  version: number;
+  current_index: number;
+  saved_at: string | null;
 }
 
 export interface WrongBook {

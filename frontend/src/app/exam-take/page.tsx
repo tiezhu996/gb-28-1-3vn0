@@ -2,6 +2,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCountdown } from '@/hooks/useCountdown';
+import { useAutoSave } from '@/hooks/useAutoSave';
 import { recordApi, type AnswerInput } from '@/api/record';
 import { examApi } from '@/api/exam';
 import { QuestionTypeBadge } from '@/components/StatusBadge';
@@ -11,7 +12,7 @@ import type { Exam, ExamRecord } from '@/types';
 function ExamTake() {
   const router = useRouter();
   const params = useSearchParams();
-  const recordId = params.get('recordId') ?? '';
+  const recordIdParam = params.get('recordId') ?? '';
   const examId = params.get('examId') ?? '';
 
   const [exam, setExam] = useState<Exam | null>(null);
@@ -25,12 +26,13 @@ function ExamTake() {
   const [notified5, setNotified5] = useState(false);
   const cheatRef = useRef(0);
   const eventsRef = useRef<{ type: string; detail: string }[]>([]);
+  const submittingRef = useRef(false);
 
   const load = useCallback(async () => {
-    if (!recordId && !examId) return;
+    if (!recordIdParam && !examId) return;
     let rec: ExamRecord;
-    if (recordId) {
-      rec = await recordApi.get(recordId);
+    if (recordIdParam) {
+      rec = await recordApi.get(recordIdParam);
     } else if (examId) {
       rec = await recordApi.start(examId);
     } else {
@@ -43,12 +45,15 @@ function ExamTake() {
     } catch {
       setExam(null);
     }
+    // 断点续答：恢复上次已保存的答案与当前题号（未交卷状态不变，答卷仍为 in_progress）
     const ans: Record<string, string> = {};
     rec.questions.forEach((q) => {
       if (q.user_answer) ans[q.question_id] = q.user_answer;
     });
     setAnswers(ans);
-  }, [recordId, examId]);
+    const restoredIndex = Math.min(Math.max(rec.current_index ?? 0, 0), Math.max(rec.questions.length - 1, 0));
+    setCurrent(restoredIndex);
+  }, [recordIdParam, examId]);
 
   useEffect(() => {
     load();
@@ -102,22 +107,34 @@ function ExamTake() {
     return new Date(record.started_at).getTime() + duration * 60 * 1000;
   }, [record, exam]);
 
+  // 自动保存草稿（作答停顿后写入，刷新/换设备重进时恢复答案、剩余时间、当前题号）
+  const draft = useAutoSave({
+    recordId: record && record.status === 'in_progress' ? record.id : null,
+    answers,
+    current,
+    version: record?.answer_version ?? 0,
+  });
+
   const doSubmit = useCallback(
     async (auto = false) => {
-      if (!record) return;
+      if (!record || submittingRef.current) return;
+      submittingRef.current = true;
       setSubmitting(true);
+      // 交卷前先尽量把未落盘的答案写入草稿；失败（网络/已截止/版本冲突）也不阻断交卷，
+      // 截止时以最后已保存的答案为准（与定时自动提交口径一致）
+      await draft.flush().catch(() => false);
       try {
         const ansList: AnswerInput[] = Object.entries(answers).map(([question_id, answer]) => ({ question_id, answer }));
         await recordApi.submit(record.id, ansList, cheatRef.current, eventsRef.current);
         alert(auto ? '考试时间到，答卷已自动提交' : '答卷提交成功，客观题已自动评分');
         router.push('/records');
       } catch (err) {
-        alert((err as Error).message);
-      } finally {
+        submittingRef.current = false;
         setSubmitting(false);
+        alert((err as Error).message);
       }
     },
-    [record, answers, router],
+    [record, answers, router, draft],
   );
 
   const { text, warn5 } = useCountdown(endAt, () => {
@@ -161,6 +178,26 @@ function ExamTake() {
 
   const answeredCount = Object.keys(answers).filter((k) => answers[k] && answers[k].trim() !== '').length;
 
+  const saveHint = (() => {
+    switch (draft.status) {
+      case 'saving':
+        return <span className="text-xs text-gray-400">正在保存…</span>;
+      case 'pending':
+        return <span className="text-xs text-gray-400">待保存…</span>;
+      case 'saved':
+        return <span className="text-xs text-green-600">✓ 答案已自动保存</span>;
+      case 'error':
+        return (
+          <span className="flex items-center gap-2 text-xs text-red-600">
+            ⚠️ 保存失败，作答仍保留在本页
+            <button onClick={draft.retry} className="rounded border border-red-300 px-1.5 py-0.5 hover:bg-red-50">重试</button>
+          </span>
+        );
+      default:
+        return null;
+    }
+  })();
+
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_260px]">
       <div className="space-y-4">
@@ -170,12 +207,27 @@ function ExamTake() {
             <p className="text-xs text-gray-400">共 {record.questions.length} 题 · 已答 {answeredCount} 题</p>
           </div>
           <div className="flex items-center gap-3">
+            {saveHint}
             {warn5 && <span className="text-sm font-medium text-red-600">⚠️ 剩余不足 5 分钟</span>}
             <span className={`rounded-lg px-3 py-1 font-mono text-lg font-bold ${warn5 ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'}`}>
               {text}
             </span>
           </div>
         </div>
+
+        {draft.status === 'conflict' && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            <span>⚠️ {draft.errorMsg}</span>
+            <button onClick={() => window.location.reload()}
+              className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700">刷新加载最新答案</button>
+          </div>
+        )}
+        {draft.status === 'error' && (
+          <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700">
+            ⚠️ {draft.errorMsg}。页面上的作答不会被改动，恢复网络后可自动重试，或点击
+            <button onClick={draft.retry} className="mx-1 font-medium underline">立即重试</button>。
+          </div>
+        )}
 
         <div className="rounded-xl border border-gray-200 bg-white p-6">
           <div className="flex items-center justify-between">

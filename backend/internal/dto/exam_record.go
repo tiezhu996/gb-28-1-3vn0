@@ -19,9 +19,25 @@ type AnswerInput struct {
 
 // SubmitRecordRequest 提交答卷请求。
 type SubmitRecordRequest struct {
-	Answers    []AnswerInput `json:"answers" binding:"required,min=1"`
-	CheatCount int           `json:"cheat_count" binding:"omitempty,min=0,max=1000"`
+	Answers     []AnswerInput     `json:"answers" binding:"required,min=1"`
+	CheatCount  int               `json:"cheat_count" binding:"omitempty,min=0,max=1000"`
 	CheatEvents []CheatEventInput `json:"cheat_events"`
+}
+
+// SaveDraftRequest 自动保存草稿请求（作答停顿后由前端静默发送）。
+type SaveDraftRequest struct {
+	Answers      []AnswerInput `json:"answers"`
+	CurrentIndex int           `json:"current_index" binding:"omitempty,min=0"`
+	// Version 客户端保存所基于的草稿版本号；服务端只接受 version == 当前版本 的请求，
+	// 乱序到达的旧请求（version 落后）直接忽略，防止覆盖更新后的答案。
+	Version int64 `json:"version" binding:"min=0"`
+}
+
+// SaveDraftResponse 草稿保存结果：返回保存后的最新版本，供客户端推进乐观锁。
+type SaveDraftResponse struct {
+	Version      int64      `json:"version"`
+	CurrentIndex int        `json:"current_index"`
+	SavedAt      *time.Time `json:"saved_at"`
 }
 
 // CheatEventInput 防作弊事件输入。
@@ -63,35 +79,38 @@ type ExamReportItem struct {
 
 // ExamReport 成绩分析报告。
 type ExamReport struct {
-	ExamID          string            `json:"exam_id"`
-	ExamTitle       string            `json:"exam_title"`
-	TotalStudents   int               `json:"total_students"`
-	AverageScore    float64           `json:"average_score"`
-	MaxScore        float64           `json:"max_score"`
-	MinScore        float64           `json:"min_score"`
-	PassRate        float64           `json:"pass_rate"`
-	ScoreBands      map[string]int    `json:"score_bands"` // 分数段直方图
-	QuestionReports []ExamReportItem  `json:"question_reports"`
+	ExamID          string           `json:"exam_id"`
+	ExamTitle       string           `json:"exam_title"`
+	TotalStudents   int              `json:"total_students"`
+	AverageScore    float64          `json:"average_score"`
+	MaxScore        float64          `json:"max_score"`
+	MinScore        float64          `json:"min_score"`
+	PassRate        float64          `json:"pass_rate"`
+	ScoreBands      map[string]int   `json:"score_bands"` // 分数段直方图
+	QuestionReports []ExamReportItem `json:"question_reports"`
 }
 
 // RecordResponse 考试记录响应。
 type RecordResponse struct {
-	ID              string                    `json:"id"`
-	ExamID          string                    `json:"exam_id"`
-	ExamTitle       string                    `json:"exam_title"`
-	StudentID       string                    `json:"student_id"`
-	StudentName     string                    `json:"student_name"`
-	Status          string                    `json:"status"`
-	StartedAt       time.Time                 `json:"started_at"`
-	SubmittedAt     *time.Time                `json:"submitted_at"`
-	ObjectiveScore  float64                   `json:"objective_score"`
-	SubjectiveScore float64                   `json:"subjective_score"`
-	FinalScore      float64                   `json:"final_score"`
-	PassScore       float64                   `json:"pass_score"`
-	CheatCount      int                       `json:"cheat_count"`
-	AutoSubmitted   bool                      `json:"auto_submitted"`
-	Questions       []model.AttemptQuestion   `json:"questions"`
-	CreatedAt       time.Time                 `json:"created_at"`
+	ID              string                  `json:"id"`
+	ExamID          string                  `json:"exam_id"`
+	ExamTitle       string                  `json:"exam_title"`
+	StudentID       string                  `json:"student_id"`
+	StudentName     string                  `json:"student_name"`
+	Status          string                  `json:"status"`
+	StartedAt       time.Time               `json:"started_at"`
+	SubmittedAt     *time.Time              `json:"submitted_at"`
+	ObjectiveScore  float64                 `json:"objective_score"`
+	SubjectiveScore float64                 `json:"subjective_score"`
+	FinalScore      float64                 `json:"final_score"`
+	PassScore       float64                 `json:"pass_score"`
+	CheatCount      int                     `json:"cheat_count"`
+	AutoSubmitted   bool                    `json:"auto_submitted"`
+	AnswerVersion   int64                   `json:"answer_version"`
+	CurrentIndex    int                     `json:"current_index"`
+	SavedAt         *time.Time              `json:"saved_at"`
+	Questions       []model.AttemptQuestion `json:"questions"`
+	CreatedAt       time.Time               `json:"created_at"`
 }
 
 // ToRecordResponse 模型转响应。
@@ -110,6 +129,9 @@ func ToRecordResponse(r *model.ExamRecord) RecordResponse {
 		FinalScore:      r.FinalScore,
 		CheatCount:      r.CheatCount,
 		AutoSubmitted:   r.AutoSubmitted,
+		AnswerVersion:   r.AnswerVersion,
+		CurrentIndex:    r.CurrentIndex,
+		SavedAt:         r.SavedAt,
 		Questions:       r.Questions,
 		CreatedAt:       r.CreatedAt,
 	}

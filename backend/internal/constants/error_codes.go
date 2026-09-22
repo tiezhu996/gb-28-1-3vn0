@@ -39,6 +39,8 @@ const (
 	CodeRecordStatusErr   = 5002 // 考试记录状态非法/不可提交
 	CodeRecordExpired     = 5003 // 考试记录已超时
 	CodeRecordAlreadyDone = 5004 // 考试记录已提交
+	CodeRecordVersion     = 5005 // 草稿版本过旧（乱序保存请求，已忽略）
+	CodeRecordNotOwner    = 5006 // 非本人答卷，无权操作
 
 	// 错题本模块
 	CodeWrongBookNotFound = 6001 // 错题本条目不存在
@@ -103,6 +105,10 @@ func ErrorCodeText(code int) string {
 		return "考试记录已超时"
 	case CodeRecordAlreadyDone:
 		return "考试记录已提交"
+	case CodeRecordVersion:
+		return "草稿版本过旧，保存请求已忽略"
+	case CodeRecordNotOwner:
+		return "非本人答卷，无权操作"
 	case CodeWrongBookNotFound:
 		return "错题本条目不存在"
 	case CodeWrongBookExists:

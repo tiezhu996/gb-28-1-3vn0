@@ -103,6 +103,71 @@ func (s *ExamRecordService) StartExam(ctx context.Context, examID, studentID pri
 	return rec, nil
 }
 
+// SaveDraft 自动保存作答草稿（断点续答）。
+// 仅接受本人、进行中、未超过考试截止时间的答卷；基于 answer_version 乐观锁忽略乱序到达的旧请求。
+// 不改变答卷状态、不评分。
+func (s *ExamRecordService) SaveDraft(ctx context.Context, recordID, studentID primitive.ObjectID, answers []dto.AnswerInput, currentIndex int, version int64) (*dto.SaveDraftResponse, error) {
+	rec, err := s.repo.FindByID(ctx, recordID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, util.NewAppError(constants.CodeRecordNotFound, fmt.Sprintf(constants.MsgRecordNotFound, recordID.Hex()))
+		}
+		return nil, fmt.Errorf("exam record service save draft find: %w", err)
+	}
+	// 只接受本人的答卷
+	if rec.StudentID != studentID {
+		return nil, util.NewAppError(constants.CodeRecordNotOwner, fmt.Sprintf(constants.MsgRecordNotOwner, recordID.Hex()))
+	}
+	if rec.Status != constants.RecordStatusInProgress {
+		return nil, util.NewAppError(constants.CodeRecordAlreadyDone, fmt.Sprintf(constants.MsgRecordStatusInvalid, rec.Status))
+	}
+	exam, err := s.exam.GetByID(ctx, rec.ExamID)
+	if err != nil {
+		return nil, err
+	}
+	// 截止时间 = 开考时刻 + 考试时长（与前端倒计时、AutoSubmitExpired 口径一致）
+	deadline := rec.StartedAt.Add(time.Duration(exam.DurationMin) * time.Minute)
+	if !time.Now().Before(deadline) {
+		return nil, util.NewAppError(constants.CodeRecordExpired, constants.MsgRecordExpired)
+	}
+	// 乐观锁：版本落后说明这是乱序到达的旧保存请求，直接忽略，不能覆盖更新后的答案
+	if rec.AnswerVersion != version {
+		s.logger.Warn(constants.LogRecordSaveStale, "record_id", rec.ID.Hex(), "version", version, "current", rec.AnswerVersion, "student", rec.StudentName)
+		return nil, util.NewAppError(constants.CodeRecordVersion, fmt.Sprintf(constants.MsgRecordVersionStale, version, rec.AnswerVersion))
+	}
+
+	answerMap := make(map[string]string, len(answers))
+	for _, a := range answers {
+		answerMap[a.QuestionID] = a.Answer
+	}
+	for i := range rec.Questions {
+		if ans, ok := answerMap[rec.Questions[i].QuestionID.Hex()]; ok {
+			rec.Questions[i].UserAnswer = ans
+		}
+	}
+	if currentIndex < 0 {
+		currentIndex = 0
+	}
+	if n := len(rec.Questions); n > 0 && currentIndex > n-1 {
+		currentIndex = n - 1
+	}
+	rec.CurrentIndex = currentIndex
+	rec.AnswerVersion = version + 1
+	now := time.Now()
+	rec.SavedAt = &now
+	rec.UpdatedAt = now
+	// 条件替换：即便并发请求同时通过上面的校验，也只有一个版本能写入成功
+	if err := s.repo.SaveDraft(ctx, rec, version); err != nil {
+		if errors.Is(err, repository.ErrVersionConflict) {
+			s.logger.Warn(constants.LogRecordSaveStale, "record_id", rec.ID.Hex(), "version", version, "current", "changed", "student", rec.StudentName)
+			return nil, util.NewAppError(constants.CodeRecordVersion, fmt.Sprintf(constants.MsgRecordVersionStale, version, version+1))
+		}
+		return nil, fmt.Errorf("exam record service save draft: %w", err)
+	}
+	s.logger.Info(constants.LogRecordSaved, "record_id", rec.ID.Hex(), "version", rec.AnswerVersion, "answers", len(answerMap), "student", rec.StudentName)
+	return &dto.SaveDraftResponse{Version: rec.AnswerVersion, CurrentIndex: rec.CurrentIndex, SavedAt: rec.SavedAt}, nil
+}
+
 // gradeQuestion 客观题自动判分（Submit 与 AutoSubmit 复用）。
 func gradeQuestion(q *model.AttemptQuestion, userAnswer string) {
 	answer := strings.TrimSpace(strings.ToUpper(userAnswer))
@@ -280,9 +345,9 @@ func (s *ExamRecordService) Report(ctx context.Context, examID primitive.ObjectI
 		return nil, fmt.Errorf("exam record service report: %w", err)
 	}
 	report := &dto.ExamReport{
-		ExamID:       examID.Hex(),
-		ExamTitle:    exam.Title,
-		ScoreBands:   map[string]int{"0-59": 0, "60-69": 0, "70-79": 0, "80-89": 0, "90-100": 0},
+		ExamID:          examID.Hex(),
+		ExamTitle:       exam.Title,
+		ScoreBands:      map[string]int{"0-59": 0, "60-69": 0, "70-79": 0, "80-89": 0, "90-100": 0},
 		QuestionReports: make([]dto.ExamReportItem, 0, len(exam.Questions)),
 	}
 	if len(recs) == 0 {

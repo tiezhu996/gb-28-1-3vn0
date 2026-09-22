@@ -1,5 +1,5 @@
 import { request, buildQuery } from '@/utils/request';
-import type { ExamRecord, ExamReport, PageResult } from '@/types';
+import type { ExamRecord, ExamReport, PageResult, SaveDraftResult } from '@/types';
 
 export interface AnswerInput {
   question_id: string;
@@ -17,6 +17,14 @@ export const recordApi = {
     return request<ExamRecord>(`/exam-records/${id}/submit`, {
       method: 'POST',
       body: JSON.stringify({ answers, cheat_count: cheatCount, cheat_events: cheatEvents }),
+    });
+  },
+  // 自动保存草稿：version 为客户端所基于的草稿版本，服务端忽略乱序到达的旧请求
+  saveDraft(id: string, answers: AnswerInput[], currentIndex: number, version: number, keepalive = false) {
+    return request<SaveDraftResult>(`/exam-records/${id}/save`, {
+      method: 'POST',
+      body: JSON.stringify({ answers, current_index: currentIndex, version }),
+      keepalive,
     });
   },
   get(id: string) {

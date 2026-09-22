@@ -32,5 +32,7 @@ const (
 	MsgRecordNotFound      = "考试记录模块：id=%s 的记录不存在"
 	MsgRecordStatusInvalid = "考试记录模块：状态字段 %s 非法，无法执行该操作"
 	MsgRecordExpired       = "考试记录模块：考试时长已超时"
+	MsgRecordVersionStale  = "考试记录模块：草稿版本 version=%d 已过期（当前版本 %d），旧保存请求已忽略"
+	MsgRecordNotOwner      = "考试记录模块：id=%s 的答卷不属于当前学生，无权操作"
 	MsgWrongBookExists     = "错题本模块：question_id=%s 已在错题本中"
 )

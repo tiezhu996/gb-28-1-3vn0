@@ -16,6 +16,7 @@ func RegisterExamRecordRoutes(g *gin.RouterGroup, h *handler.ExamRecordHandler) 
 		student.POST("/:id/start", h.Start)
 		student.GET("/mine", h.ListMine)
 		student.POST("/:id/submit", h.Submit)
+		student.POST("/:id/save", h.SaveDraft)
 	}
 
 	// 教师/管理员：按试卷查记录、批改、报告

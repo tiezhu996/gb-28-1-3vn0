@@ -161,6 +161,7 @@ npm run dev                  # http://localhost:3000，/api 已代理到 localho
 | POST | /exam-records/:examId/start | 学生 | 开始考试（随机题序/选项） |
 | GET | /exam-records/mine | 学生 | 我的考试记录 |
 | POST | /exam-records/:id/submit | 学生 | 提交答卷（客观题自动判分） |
+| POST | /exam-records/:id/save | 学生 | 自动保存草稿（乐观锁 version，仅本人进行中且未截止） |
 | GET | /exam-records/:id | 登录 | 答卷详情 |
 | GET | /exams/:examId/records | 教师/管理员 | 某考试全部答卷 |
 | POST | /exam-records/:id/grade | 教师/管理员 | 主观题批改 |

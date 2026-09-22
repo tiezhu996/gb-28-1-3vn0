@@ -17,6 +17,9 @@ import (
 type ExamRecordRepository interface {
 	Create(ctx context.Context, r *model.ExamRecord) error
 	Update(ctx context.Context, r *model.ExamRecord) error
+	// SaveDraft 乐观锁保存草稿：仅当答卷仍属于本人、进行中且 answer_version 与期望版本一致时替换。
+	// 版本不一致（乱序的旧请求）返回 ErrVersionConflict。
+	SaveDraft(ctx context.Context, r *model.ExamRecord, expectedVersion int64) error
 	FindByID(ctx context.Context, id primitive.ObjectID) (*model.ExamRecord, error)
 	FindActiveByExamAndStudent(ctx context.Context, examID, studentID primitive.ObjectID) (*model.ExamRecord, error)
 	List(ctx context.Context, filter bson.M, page, pageSize int64) ([]*model.ExamRecord, int64, error)
@@ -49,6 +52,24 @@ func (r *MongoExamRecordRepository) Update(ctx context.Context, rec *model.ExamR
 	}
 	if res.MatchedCount == 0 {
 		return fmt.Errorf("update exam record: %w", ErrNotFound)
+	}
+	return nil
+}
+
+// SaveDraft 条件替换整份答卷：过滤条件同时校验归属人、进行中状态与草稿版本，
+// 保证“他人答卷 / 已交卷 / 旧版本请求”都不会覆盖最新答案（原子操作，避免读-改-写竞态）。
+func (r *MongoExamRecordRepository) SaveDraft(ctx context.Context, rec *model.ExamRecord, expectedVersion int64) error {
+	res, err := r.coll.ReplaceOne(ctx, bson.M{
+		"_id":            rec.ID,
+		"student_id":     rec.StudentID,
+		"status":         modelStatusInProgress(),
+		"answer_version": expectedVersion,
+	}, rec)
+	if err != nil {
+		return fmt.Errorf("save draft exam record: %w", err)
+	}
+	if res.MatchedCount == 0 {
+		return fmt.Errorf("save draft exam record: %w", ErrVersionConflict)
 	}
 	return nil
 }
